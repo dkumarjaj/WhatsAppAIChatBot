@@ -8,9 +8,7 @@ const fs = require('fs');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // WhatsApp client
-const client = new Client({
-    authStrategy: new LocalAuth()
-});
+const client = new Client({ puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] } });
 
 const FILE = "users.json";
 const EXPIRY = 24 * 60 * 60 * 1000;
