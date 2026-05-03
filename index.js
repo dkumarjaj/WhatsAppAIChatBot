@@ -8,10 +8,61 @@ const fs = require('fs');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // WhatsApp client
-const client = new Client({ puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] } });
+const client = new Client({
+    authStrategy: new LocalAuth({
+        clientId: "bot-session"
+    }),
+    puppeteer: {
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    },
+    takeoverOnConflict: true,
+    takeoverTimeoutMs: 30*24*60*60*1000 // 30 days
+});
 
 const FILE = "users.json";
 const EXPIRY = 24 * 60 * 60 * 1000;
+
+const LANGUAGES = [
+  "English (en)", "Hindi (hi)", "Tamil (ta)", "Telugu (te)",
+  "Bengali (bn)", "Marathi (mr)", "Gujarati (gu)",
+  "Kannada (kn)", "Malayalam (ml)", "Punjabi (pa)",
+  "Spanish (es)", "French (fr)", "German (de)",
+  "Chinese (zh)", "Arabic (ar)"
+];
+
+function isInvalidLanguageInput(text) {
+  return text.length > 20 || text.split(" ").length > 1;
+}
+
+function sendLanguageOptions(message) {
+    return message.reply(
+`⚠️ Please select a valid language.
+
+👉 Choose one:
+
+${LANGUAGES.map((l, i) => `${i + 1}. ${l}`).join("\n")}
+
+Example: English or en`
+    );
+}
+
+function formatTime(ms) {
+    let seconds = Math.floor(ms / 1000);
+
+    const hours = Math.floor(seconds / 3600);
+    seconds %= 3600;
+
+    const minutes = Math.floor(seconds / 60);
+    seconds %= 60;
+
+    let parts = [];
+
+    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`);
+    if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
+    if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`);
+
+    return parts.join(" ");
+}
 
 // ✅ Safe load
 function loadUsers() {
@@ -101,6 +152,8 @@ Reply in ${language || "English"}`
 }
 
 // Message handler
+const SHORT_LIMIT = 1; // max queries
+const SHORT_WINDOW = 24 * 60 * 60 * 1000 
 client.on('message', async (message) => {
     const user = message.from;
     const text = message.body.trim().toLowerCase();
@@ -139,7 +192,9 @@ Type your choice`);
             mode: "pending",
             lastActive: Date.now(),
             language: "",
-            history: []
+            history: [],
+            queryCount: 0,
+    queryResetTime: Date.now()
         };
         saveUsers(users);
 
@@ -164,11 +219,17 @@ Type your choice`);
         }
 
         // 2. If it is pending, save whatever they just typed
-        if (userData.language === "pending") {
-            userData.language = text; // Save their input
-            saveUsers(users);
-            return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
-        }
+     if (userData.language === "pending") {
+
+    if (isInvalidLanguageInput(text)) {
+    return sendLanguageOptions(message);
+}
+
+    userData.language = text;
+    saveUsers(users);
+
+    return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
+}
             return message.reply("🤖 AI mode ON");
         }
 
@@ -191,10 +252,15 @@ Type your choice`);
 
         // 2. If it is pending, save whatever they just typed
         if (userData.language === "pending") {
-            userData.language = text; // Save their input
-            saveUsers(users);
-            return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
-        }
+if (isInvalidLanguageInput(text)) {
+    return sendLanguageOptions(message);
+}
+
+    userData.language = text;
+    saveUsers(users);
+
+    return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
+}
         return message.reply("🤖 AI mode ON");
 
     }
@@ -216,14 +282,41 @@ Type your choice`);
 
         // 2. If it is pending, save whatever they just typed
         if (userData.language === "pending") {
-            userData.language = text; // Save their input
-            saveUsers(users);
-            return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
-        }
+
+   if (isInvalidLanguageInput(text)) {
+    return sendLanguageOptions(message);
+}
+
+    userData.language = text;
+    saveUsers(users);
+
+    return message.reply(`🌐 Language set to: ${userData.language}. You can continue.`);
+}
         try {
             const history = userData.history.slice(-6);
+            // ⚡ Short rate limit (2 min window)
+const now = Date.now();
+
+// remove old timestamps
+userData.shortQueries = (userData.shortQueries || []).filter(
+    t => now - t < SHORT_WINDOW
+);
+
+if (userData.shortQueries.length >= SHORT_LIMIT) {
+   const remainingMs = SHORT_WINDOW - (now - userData.shortQueries[0]);
+const waitTime = formatTime(remainingMs);
+
+return message.reply(
+`⏳ Too many requests!
+
+Try again in ${waitTime}.`
+);
+}
 
             const reply = await getAIReply(text, userData.language);
+
+            userData.queryCount += 1;
+            userData.shortQueries.push(Date.now());
 
             userData.history.push({ role: "user", text });
             userData.history.push({ role: "model", text: reply });
