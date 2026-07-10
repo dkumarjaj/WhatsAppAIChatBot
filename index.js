@@ -3,6 +3,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fs = require('fs');
+const { log } = require('console');
 
 // 🔐 Now it safely pulls from the .env file!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -96,9 +97,14 @@ client.on('ready', () => {
 });
 
 
+
 async function getAIReply(text,language) {
     // 👇 CHANGED: Using current active model names
-    const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro"];
+    const models = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash"
+];
 
     for (let m of models) {
         try {
@@ -151,8 +157,15 @@ Reply in ${language || "English"}`
     return "⚠️ AI service temporarily unavailable. \n Please try again later. \n Enter Exit or Normal to switch to normal mode.";
 }
 
+function formatForWhatsApp(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '*$1*')     // Bold
+    .replace(/__(.*?)__/g, '_$1_')         // Italic
+    .replace(/```(\w+)?\n/g, '```\n');     // Remove language identifier
+}
+
 // Message handler
-const SHORT_LIMIT = 1; // max queries
+const SHORT_LIMIT = 10; // max queries
 const SHORT_WINDOW = 24 * 60 * 60 * 1000 
 client.on('message', async (message) => {
     const user = message.from;
@@ -313,8 +326,8 @@ Try again in ${waitTime}.`
 );
 }
 
-            const reply = await getAIReply(text, userData.language);
-
+            let reply = await getAIReply(text, userData.language);
+            reply=formatForWhatsApp(reply);
             userData.queryCount += 1;
             userData.shortQueries.push(Date.now());
 
